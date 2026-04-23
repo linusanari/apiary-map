@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Apiary Site Suitability Web Map</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!--
+    georaster + georaster-layer-for-leaflet
+    These two libraries let Leaflet render GeoTIFF rasters directly in the browser.
+    Replace the CDN links below with local copies if working offline.
+  -->
+  <script src="https://unpkg.com/georaster@1.6.0/dist/georaster.browser.bundle.min.js"></script>
+  <script src="https://unpkg.com/georaster-layer-for-leaflet@3.9.1/dist/georaster-layer-for-leaflet.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #fffbeb;
+    }
+
+    .app-container {
+      display: flex;
+      height: 100vh;
+      width: 100vw;
+      position: relative;
+    }
+
+    /* ── SIDEBAR ── */
+    .sidebar {
+      width: 340px;
+      padding: 18px 16px;
+      background: linear-gradient(160deg, #fef9c3, #facc15);
+      box-shadow: 2px 0 16px rgba(146,64,14,.25);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      overflow-y: auto;
+      z-index: 1000;
+    }
+
+    .panel {
+      background: rgba(255,255,255,.97);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 3px 12px rgba(146,64,14,.12);
+    }
+
+    h2 { font-size: 1rem; font-weight: 700; color: #78350f; margin-bottom: 6px; }
+    h3 { font-size: .9rem; font-weight: 700; color: #78350f; margin-bottom: 8px; }
+    h4 { font-size: .82rem; font-weight: 600; color: #92400e; margin: 10px 0 4px; }
+    p, li { font-size: .82rem; color: #4b5563; line-height: 1.5; }
+    ul { padding-left: 16px; }
+
+    /* Layer toggles */
+    .layers-list { display: flex; flex-direction: column; gap: 6px; }
+
+    .layer-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 8px;
+      border-radius: 8px;
+      background: #fffbeb;
+    }
+
+    .layer-row label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: .82rem;
+      color: #374151;
+    }
+
+    .layer-row input[type=checkbox] { cursor: pointer; accent-color: #f59e0b; }
+
+    .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* Opacity slider */
+    .opacity-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: .72rem;
+      color: #6b7280;
+    }
+    .opacity-wrap input[type=range] {
+      width: 70px;
+      accent-color: #f59e0b;
+    }
+
+    /* Status badges */
+    .badge {
+      font-size: .65rem;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+    .badge-loading { background: #fef3c7; color: #92400e; }
+    .badge-ok      { background: #dcfce7; color: #166534; }
+    .badge-error   { background: #fee2e2; color: #991b1b; }
+
+    /* Buttons */
+    .btn-outline {
+      width: 100%; padding: 8px;
+      border-radius: 999px;
+      border: 1px solid #f59e0b;
+      background: #fffbeb;
+      color: #92400e;
+      cursor: pointer;
+      font-size: .8rem;
+    }
+    .btn-outline:hover { background: #fef3c7; }
+
+    .btn-secondary {
+      width: 100%; margin-top: 8px; padding: 8px;
+      border-radius: 999px;
+      border: none;
+      background: #f97316;
+      color: white;
+      cursor: pointer;
+      font-size: .8rem;
+    }
+    .btn-secondary:hover { background: #ea580c; }
+
+    /* Map */
+    #map { flex: 1; height: 100vh; }
+
+    /* Search overlay */
+    .search-overlay {
+      position: absolute;
+      top: 14px; right: 16px;
+      background: #fff;
+      padding: 6px 10px;
+      border-radius: 999px;
+      box-shadow: 0 4px 14px rgba(0,0,0,.18);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 999;
+    }
+    .search-input { width: 210px; border: none; outline: none; font-size: .85rem; }
+    .search-btn { background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #92400e; }
+
+    /* Legend */
+    .map-legend {
+      position: absolute;
+      bottom: 18px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(250,204,21,.95);
+      border: 1px solid #f59e0b;
+      padding: 7px 14px;
+      border-radius: 999px;
+      color: #78350f;
+      display: flex;
+      gap: 14px;
+      font-size: .78rem;
+      z-index: 900;
+      white-space: nowrap;
+    }
+    .lg-sq {
+      width: 10px; height: 10px;
+      border-radius: 3px;
+      display: inline-block;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+
+    /* Info popup */
+    #info-box {
+      position: absolute;
+      bottom: 60px; right: 16px;
+      background: #fff;
+      border: 1px solid #f59e0b;
+      border-radius: 12px;
+      padding: 12px 14px;
+      max-width: 280px;
+      font-size: .8rem;
+      color: #374151;
+      box-shadow: 0 4px 16px rgba(0,0,0,.15);
+      z-index: 998;
+      display: none;
+    }
+    #info-box h4 { margin-bottom: 4px; }
+  </style>
+</head>
+
+<body>
+<div class="app-container">
+
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar">
+
+    <div class="panel">
+      <h2>🐝 Apiary Site Suitability</h2>
+      <p>Visualising foliage, water, human risk and composite suitability layers.</p>
+    </div>
+
+    <div class="panel">
+      <h3>Suitability Layers</h3>
+      <div class="layers-list">
+
+        <!-- Forage / NDVI -->
+        <div class="layer-row">
+          <label>
+            <input type="checkbox" id="toggle-forage" checked>
+            <span class="dot" style="background:#16a34a"></span>
+            Forage (NDVI)
+          </label>
+          <span class="badge badge-loading" id="status-forage">Loading…</span>
+        </div>
+        <div class="opacity-wrap" style="padding: 0 8px 6px">
+          Opacity
+          <input type="range" id="opacity-forage" min="0" max="1" step="0.05" value="0.7">
+          <span id="opval-forage">70%</span>
+        </div>
+
+        <!-- Water -->
+        <div class="layer-row">
+          <label>
+            <input type="checkbox" id="toggle-water" checked>
+            <span class="dot" style="background:#0284c7"></span>
+            Water bodies
+          </label>
+          <span class="badge badge-loading" id="status-water">Loading…</span>
+        </div>
+
+        <!-- Human Risk -->
+        <div class="layer-row">
+          <label>
+            <input type="checkbox" id="toggle-risk" checked>
+            <span class="dot" style="background:#f97316"></span>
+            Human risk
+          </label>
+          <span class="badge badge-loading" id="status-risk">Loading…</span>
+        </div>
+
+        <!-- Composite -->
+        <div class="layer-row">
+          <label>
+            <input type="checkbox" id="toggle-composite" checked>
+            <span class="dot" style="background:#db2777"></span>
+            Composite
+          </label>
+          <span class="badge badge-loading" id="status-composite">Loading…</span>
+        </div>
+        <div class="opacity-wrap" style="padding: 0 8px 6px">
+          Opacity
+          <input type="range" id="opacity-composite" min="0" max="1" step="0.05" value="0.65">
+          <span id="opval-composite">65%</span>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Controls</h3>
+      <ul>
+        <li>Toggle layers above to explore suitability.</li>
+        <li>Search a location or use GPS below.</li>
+        <li>Click any layer feature for details.</li>
+      </ul>
+      <button id="use-location-button" class="btn-outline" style="margin-top:10px">📍 Use My Location</button>
+      <button id="reset-map-button" class="btn-secondary">🔄 Reset Map</button>
+
+      <h4>Recent Searches</h4>
+      <ul id="search-history-list" style="list-style:none;padding:0;font-size:.78rem;color:#6b7280"></ul>
+    </div>
+
+    <div class="panel" style="text-align:center;font-size:.72rem;color:#6b7280">
+      © 2025 Apiary Suitability · Academic prototype
+    </div>
+
+  </aside>
+
+  <!-- ── MAP ── -->
+  <div id="map"></div>
+
+  <!-- ── SEARCH ── -->
+  <div class="search-overlay">
+    <input id="location-search-input" class="search-input" placeholder="Search location…" />
+    <button id="location-search-button" class="search-btn">🔍</button>
+  </div>
+
+  <!-- ── LEGEND ── -->
+  <div class="map-legend">
+    <span><span class="lg-sq" style="background:#16a34a"></span>Forage</span>
+    <span><span class="lg-sq" style="background:#0284c7"></span>Water</span>
+    <span><span class="lg-sq" style="background:#f97316"></span>Risk</span>
+    <span><span class="lg-sq" style="background:#db2777"></span>Composite</span>
+  </div>
+
+  <!-- ── CLICK INFO BOX ── -->
+  <div id="info-box">
+    <h4 id="info-title">Feature info</h4>
+    <p id="info-body"></p>
+  </div>
+
+</div><!-- .app-container -->
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  CONFIGURATION — update these paths to point at YOUR files
+//
+//  Option A (same folder as this HTML):
+//    DATA.forage  = "ndvi_forage.tif"
+//    DATA.water   = "water.geojson"
+//    DATA.risk    = "human_risk.geojson"
+//    DATA.composite = "composite.tif"
+//
+//  Option B (absolute URL once hosted):
+//    DATA.forage  = "https://yourdomain.com/layers/ndvi_forage.tif"
+//
+//  TIP: run a local server (e.g. `python -m http.server 8000`) so
+//  fetch() can load local files — file:// blocks CORS requests.
+// ═══════════════════════════════════════════════════════
+const DATA = {
+  forage    : "ndvi_forage.tif",         // ← your NDVI GeoTIFF
+  water     : "water.geojson",           // ← your water shapefile converted to GeoJSON
+  risk      : "human_risk.geojson",      // ← your buildings-buffer GeoJSON
+  composite : "composite.tif"            // ← your fuzzy-overlay GeoTIFF
+};
+
+// Default map centre and zoom (adjust to your study area)
+const DEFAULT_CENTER = [-0.5, 36.5];
+const DEFAULT_ZOOM   = 8;
+
+// ═══════════════════════════════════════════════════════
+//  MAP INITIALISATION
+// ═══════════════════════════════════════════════════════
+const map = L.map("map").setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: "© OpenStreetMap contributors"
+}).addTo(map);
+
+// ═══════════════════════════════════════════════════════
+//  HELPER: update layer status badge
+// ═══════════════════════════════════════════════════════
+function setStatus(id, state) {
+  const el = document.getElementById("status-" + id);
+  if (!el) return;
+  el.className = "badge badge-" + state;
+  el.textContent = state === "ok" ? "✓ Loaded" : state === "error" ? "✗ Error" : "Loading…";
+}
+
+// ═══════════════════════════════════════════════════════
+//  LAYER STORE
+// ═══════════════════════════════════════════════════════
+const layers = {};
+
+// ═══════════════════════════════════════════════════════
+//  RASTER LOADER  (uses georaster + georaster-layer-for-leaflet)
+//
+//  pixelValueToColor maps the raster's pixel value → RGBA.
+//  Adjust the colour ramp to match your data range.
+//  For NDVI: values typically run −1 to +1 (scaled to 0–255 if byte raster).
+//  For Composite: 0 (unsuitable) to 1 (highly suitable), scaled similarly.
+// ═══════════════════════════════════════════════════════
+async function loadRaster(key, url, colorFn, opacity) {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const arrayBuffer = await response.arrayBuffer();
+    const georaster   = await parseGeoraster(arrayBuffer);
+
+    const layer = new GeoRasterLayer({
+      georaster,
+      opacity,
+      pixelValuesToColorFn: colorFn,
+      resolution: 256       // tile resolution; increase for sharper output
+    });
+
+    layers[key] = layer;
+    layer.addTo(map);
+    setStatus(key, "ok");
+    return layer;
+  } catch (err) {
+    console.error("Failed to load raster:", key, err);
+    setStatus(key, "error");
+  }
+}
+
+// ── Colour ramps ─────────────────────────────────────────
+// NDVI foliage: grey (low) → yellow-green → dark green (high)
+// Assumes single-band raster with values 0–255 (no-data = 0 or negative)
+function forageColor([val]) {
+  if (val === null || val <= 0) return null; // transparent for no-data
+  const t = Math.min(val / 255, 1);
+  // low NDVI = tan, high = rich green
+  const r = Math.round(180 - 140 * t);
+  const g = Math.round(160 + 60 * t);
+  const b = Math.round(80  - 60 * t);
+  return `rgba(${r},${g},${b},0.75)`;
+}
+
+// Composite suitability: red (low) → yellow → green (high)
+// Assumes 0–1 or 0–255 float; adjust divisor accordingly
+function compositeColor([val]) {
+  if (val === null || val <= 0) return null;
+  const t = Math.min(val / 255, 1);
+  if (t < 0.33) return `rgba(220,38,38,0.65)`;   // low suitability
+  if (t < 0.66) return `rgba(250,204,21,0.65)`;   // medium
+  return `rgba(22,163,74,0.7)`;                   // high suitability
+}
+
+// ═══════════════════════════════════════════════════════
+//  VECTOR LOADER  (GeoJSON from converted shapefile)
+// ═══════════════════════════════════════════════════════
+async function loadVector(key, url, style, pointFn) {
+  try {
+    const res  = await fetch(url);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+
+    const layer = L.geoJSON(data, {
+      style,
+      pointToLayer: pointFn || undefined,
+      onEachFeature(feature, lyr) {
+        lyr.on("click", () => showInfo(key, feature.properties));
+      }
+    });
+
+    layers[key] = layer;
+    layer.addTo(map);
+    setStatus(key, "ok");
+
+    // Auto-zoom to the first loaded vector extent
+    if (key === "water") map.fitBounds(layer.getBounds().pad(0.15));
+
+    return layer;
+  } catch (err) {
+    console.error("Failed to load vector:", key, err);
+    setStatus(key, "error");
+  }
+}
+
+// ── Vector styles ─────────────────────────────────────
+const waterStyle = {
+  color      : "#0369a1",
+  fillColor  : "#38bdf8",
+  fillOpacity: 0.45,
+  weight     : 1.5
+};
+
+const riskStyle = {
+  color      : "#c2410c",
+  fillColor  : "#fb923c",
+  fillOpacity: 0.35,
+  weight     : 1.5,
+  dashArray  : "4 3"      // dashed outline signals "avoid" zone
+};
+
+function waterPoint(feature, latlng) {
+  return L.circleMarker(latlng, {
+    radius     : 7,
+    color      : "#0369a1",
+    fillColor  : "#0ea5e9",
+    fillOpacity: 0.9,
+    weight     : 1.5
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+//  INFO BOX (click feature → show properties)
+// ═══════════════════════════════════════════════════════
+function showInfo(layerKey, props) {
+  const box   = document.getElementById("info-box");
+  const title = document.getElementById("info-title");
+  const body  = document.getElementById("info-body");
+
+  const labels = {
+    forage   : "Forage (NDVI) zone",
+    water    : "Water body",
+    risk     : "Human risk buffer",
+    composite: "Composite suitability"
+  };
+
+  title.textContent = labels[layerKey] || "Feature";
+  if (props && Object.keys(props).length > 0) {
+    body.textContent = Object.entries(props)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(" · ");
+  } else {
+    body.textContent = "No attributes found for this feature.";
+  }
+
+  box.style.display = "block";
+}
+
+map.on("click", () => { document.getElementById("info-box").style.display = "none"; });
+
+// ═══════════════════════════════════════════════════════
+//  LOAD ALL LAYERS
+// ═══════════════════════════════════════════════════════
+loadRaster("forage",    DATA.forage,    forageColor,    0.70);
+loadVector("water",     DATA.water,     waterStyle,     waterPoint);
+loadVector("risk",      DATA.risk,      riskStyle,      null);
+loadRaster("composite", DATA.composite, compositeColor, 0.65);
+
+// ═══════════════════════════════════════════════════════
+//  LAYER TOGGLE CHECKBOXES
+// ═══════════════════════════════════════════════════════
+["forage","water","risk","composite"].forEach(key => {
+  const chk = document.getElementById("toggle-" + key);
+  if (!chk) return;
+  chk.addEventListener("change", () => {
+    const lyr = layers[key];
+    if (!lyr) return;
+    chk.checked ? map.addLayer(lyr) : map.removeLayer(lyr);
+  });
+});
+
+// ═══════════════════════════════════════════════════════
+//  OPACITY SLIDERS (rasters only)
+// ═══════════════════════════════════════════════════════
+function bindOpacity(key) {
+  const slider = document.getElementById("opacity-" + key);
+  const label  = document.getElementById("opval-" + key);
+  if (!slider) return;
+  slider.addEventListener("input", () => {
+    const v = parseFloat(slider.value);
+    label.textContent = Math.round(v * 100) + "%";
+    const lyr = layers[key];
+    if (lyr && lyr.setOpacity) lyr.setOpacity(v);
+    // GeoRasterLayer exposes options.opacity; setOpacity may need a workaround:
+    if (lyr && lyr.options) { lyr.options.opacity = v; lyr.redraw && lyr.redraw(); }
+  });
+}
+
+bindOpacity("forage");
+bindOpacity("composite");
+
+// ═══════════════════════════════════════════════════════
+//  SEARCH
+// ═══════════════════════════════════════════════════════
+const searchHistory = [];
+
+document.getElementById("location-search-button").addEventListener("click", doSearch);
+document.getElementById("location-search-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") doSearch();
+});
+
+function doSearch() {
+  const q = document.getElementById("location-search-input").value.trim();
+  if (!q) return;
+  fetch("https://nominatim.openstreetmap.org/search?format=json&q=" + encodeURIComponent(q))
+    .then(r => r.json())
+    .then(d => {
+      if (!d.length) { alert("Location not found."); return; }
+      const { lat, lon, display_name } = d[0];
+      map.setView([lat, lon], 13);
+      L.marker([lat, lon]).addTo(map).bindPopup(display_name).openPopup();
+
+      // Update history
+      searchHistory.unshift(display_name.split(",")[0]);
+      if (searchHistory.length > 4) searchHistory.pop();
+      const list = document.getElementById("search-history-list");
+      list.innerHTML = searchHistory
+        .map(n => `<li style="padding:2px 0;border-bottom:1px solid #f3f4f6">${n}</li>`)
+        .join("");
+    })
+    .catch(() => alert("Search failed. Check your connection."));
+}
+
+// ═══════════════════════════════════════════════════════
+//  GPS + RESET
+// ═══════════════════════════════════════════════════════
+document.getElementById("use-location-button").addEventListener("click", () => {
+  if (!navigator.geolocation) { alert("Geolocation not supported."); return; }
+  navigator.geolocation.getCurrentPosition(
+    p => {
+      const { latitude: lat, longitude: lon } = p.coords;
+      map.setView([lat, lon], 14);
+      L.marker([lat, lon])
+        .addTo(map)
+        .bindPopup("You are here")
+        .openPopup();
+    },
+    () => alert("Could not get your location.")
+  );
+});
+
+document.getElementById("reset-map-button").addEventListener("click", () => {
+  map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+});
+</script>
+</body>
+</html>
