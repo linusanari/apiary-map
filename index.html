@@ -410,8 +410,8 @@
 //  Format below: [[south (Bottom), west (Left)], [north (Top), east (Right)]]
 // ═══════════════════════════════════════════════════════
 const RASTER_BOUNDS = {
-  forage    : [[-0.539, 35.684], [-0.172, 35.916]],   // ← replace with forage.png extent
-  composite : [[-0.539, 35.684], [-0.172, 35.916]]    // ← replace with composite.png extent
+  forage    : [[-0.542220, 35.679471], [-0.178886, 35.918417]],
+  composite : [[-0.542220, 35.679471], [-0.178886, 35.918417]]
 };
 
 // ── File paths (must match your GitHub repo filenames exactly) ──
@@ -422,7 +422,8 @@ const DATA = {
   risk      : "human_risk.geojson"
 };
 
-const DEFAULT_CENTER = [-0.5, 36.5];   // adjust to your study area centroid
+// Centroid of study area: avg of bounds corners
+const DEFAULT_CENTER = [-0.3605, 35.7989];
 const DEFAULT_ZOOM   = 12;
 
 // ─────────────────────────────────────────────
